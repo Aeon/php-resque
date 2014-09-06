@@ -39,7 +39,14 @@ class Resque_Job_Status
 	 */
 	public function __construct($id)
 	{
-		$this->id = $id;
+		$this->id = self::generateId($id);
+	}
+
+	/**
+	 * generate job id consistently
+	 */
+	private static function generateId($id) {
+		return 'job:' . $id . ':status';
 	}
 
 	/**
@@ -53,9 +60,9 @@ class Resque_Job_Status
 		$statusPacket = array(
 			'status' => self::STATUS_WAITING,
 			'updated' => time(),
-			'started' => time(),
+			'started' => time()
 		);
-		Resque::redis()->set('job:' . $id . ':status', json_encode($statusPacket));
+		Resque::redis()->hmset(self::generateId($id), $statusPacket);
 	}
 
 	/**
@@ -70,7 +77,7 @@ class Resque_Job_Status
 			return false;
 		}
 
-		if(!Resque::redis()->exists((string)$this)) {
+		if(!Resque::redis()->exists($this->id)) {
 			$this->isTracking = false;
 			return false;
 		}
@@ -86,19 +93,25 @@ class Resque_Job_Status
 	 */
 	public function update($status)
 	{
+		$status = (int)$status;
+
 		if(!$this->isTracking()) {
+			return;
+		}
+
+		if($status < 1 || $status > 4) {
 			return;
 		}
 
 		$statusPacket = array(
 			'status' => $status,
-			'updated' => time(),
+			'updated' => time()
 		);
-		Resque::redis()->set((string)$this, json_encode($statusPacket));
+		Resque::redis()->hmset($this->id, $statusPacket);
 
 		// Expire the status for completed jobs after 24 hours
 		if(in_array($status, self::$completeStatuses)) {
-			Resque::redis()->expire((string)$this, 86400);
+			Resque::redis()->expire($this->id, 86400);
 		}
 	}
 
@@ -110,16 +123,52 @@ class Resque_Job_Status
 	 */
 	public function get()
 	{
-		if(!$this->isTracking()) {
-			return false;
-		}
+		return $this->fetch('status');
+	}
 
-		$statusPacket = json_decode(Resque::redis()->get((string)$this), true);
-		if(!$statusPacket) {
-			return false;
-		}
+	/**
+	 * Fetch the status for the job being monitored.
+	 *
+	 * @return mixed False if the status is not being monitored, otherwise the status as
+	 * 	as an integer, based on the Resque_Job_Status constants.
+	 */
+	public function status()
+	{
+		return $this->fetch('status');
+	}
 
-		return $statusPacket['status'];
+	/**
+	 * Fetch the updated timestamp for the job being monitored.
+	 *
+	 * @return mixed False if the status is not being monitored, otherwise the updated timestamp
+	 */
+	public function updated()
+	{
+		return $this->fetch('updated');
+	}
+
+	/**
+	 * Fetch the created timestamp for the job being monitored.
+	 *
+	 * @return mixed False if the status is not being monitored, otherwise the created timestamp
+	 */
+	public function created()
+	{
+		return $this->fetch('created');
+	}
+
+	/**
+	 * Fetch the created timestamp for the job being monitored.
+	 *
+	 * @return mixed False if the status is not being monitored, otherwise the created timestamp
+	 */
+	private function fetch($key)
+	{
+		$val = Resque::redis()->hget($this->id, $key);
+		if($val) {
+			return (int)$val;
+		}
+		return false;
 	}
 
 	/**
@@ -127,7 +176,7 @@ class Resque_Job_Status
 	 */
 	public function stop()
 	{
-		Resque::redis()->del((string)$this);
+		Resque::redis()->del($this->id);
 	}
 
 	/**
@@ -137,7 +186,7 @@ class Resque_Job_Status
 	 */
 	public function __toString()
 	{
-		return 'job:' . $this->id . ':status';
+		return $this->id;
 	}
 }
 ?>
